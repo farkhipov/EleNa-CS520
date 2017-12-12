@@ -17,8 +17,10 @@ def getFullNeighborsInfo(start, end):
 	return getNeighborsWithDist(interList)
 
 def getRegion(start, end):
-	osm = open("massachusetts.osm", "r")
-	tree = ET.parse(osm)
+	#with open(filename, encoding='utf8') as infile:
+	#	html = BeautifulSoup(infile, "html.parser")
+	#osm = open("massachusetts.osm", "r")
+	tree = ET.parse('Amherst.osm')
 	root = tree.getroot()
 	children = root.getchildren()
 
@@ -69,8 +71,8 @@ def getNodesOfRoads(region = childrenInRegion):
 		if child.tag == 'node' and child.attrib['id'] in nodeIDs and child not in allRoadNodes:
 			allRoadNodes.append(child)
 
-	for item in allRoadNodes:
-		print(str(item.attrib['lat']) + "," + str(item.attrib['lon']))
+	#for item in allRoadNodes:
+	#	print(str(item.attrib['lat']) + "," + str(item.attrib['lon']))
 
 	return allRoadNodes
 
