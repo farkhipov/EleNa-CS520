@@ -4,55 +4,152 @@ except ImportError:
 	from xml.etree import ElementTree as ET
 
 from geopy.distance import vincenty
+from geopy.geocoders import Nominatim
 import math
 import copy
+import gmplot
 
 roads = []
 intersections = []
 childrenInRegion = []
+midpoint = (0, 0)
+finalAddress = ''
+neighborsDist = []
+roadsAndNodes = []
+roadsNodes = []
 
-def getFullNeighborsInfo(start, end):
-	region = getRegion(start, end)
+def getFullNeighborsInfo(startAddress, endAddress, distIncrease):
+	global finalAddress
+	finalAddress = endAddress
+	geolocator = Nominatim()
+	startLocation = geolocator.geocode(startAddress)
+	endLocation = geolocator.geocode(endAddress)
+
+	region = getRegion((startLocation.latitude, startLocation.longitude), (endLocation.latitude, endLocation.longitude), distIncrease)
 	interList = getIntersections(region)
 	return getNeighborsWithDist(interList)
 
-def getRegion(start, end):
-	osm = open("massachusetts.osm", "r")
-	tree = ET.parse(osm)
+def plotMap(route):
+	coords = getRouteCoords(route)
+
+	global midpoint
+	global finalAddress
+	gmap = gmplot.GoogleMapPlotter(midpoint[0], midpoint[1], 12)
+	gmap.plot(coords[0], coords[1],'cornflowerblue', edge_width=3)
+	gmap.draw('Route to' + finalAddress + '.html')
+
+def getRouteCoords(route):
+	lats = []
+	lons = []
+
+	for x in range(0, len(route)):
+		lats.append(route[x][0])
+		lons.append(route[x][1])
+		coordsBetween = findCoordsBetween(route[x], route[x] + 1)
+		for coord in coordsBetween:
+			lats.append(coord[0])
+			lons.append(coord[1])
+
+	return (lats, lons)
+
+def findCoordsBetween(node1, node2):
+	global roadsAndNodes, nodesOfRoads
+	id1 = getNodeId(node1)
+	id2 = getNodeId(node2)
+	roadsWithNodes = roadsAndNodes
+	shortestDistance = 0
+	roadNodes = nodesOfRoads
+	currentDistance = 0
+	distances = []
+	shortestPath = []
+	for road in roadsWithNodes:
+		if (id1 in road[1]) and (id2 in road[1]):
+			path = []
+			start = False
+			for item in road[1]:
+				if not start:
+					if (item == id2) or (item == id1):
+						start = True
+						path.append(item)
+				else:
+					path.append(item)
+					if (item == id1) or (item == id2):
+						break
+			for x in range(0, len(path) - 1):
+
+				currentNode = (0, 0)
+				nextNode = (0, 0)
+				for node in roadNodes:
+					if node.attrib['id'] == path[x]:
+						currentNode = (float(node.attrib['lat']), float(node.attrib['lon']))
+					if node.attrib['id'] == path[x+1]:
+						nextNode = (float(node.attrib['lat']), float(node.attrib['lon']))
+				currentDistance += vincenty(currentNode, nextNode).meters
+
+			if shortestDistance == 0 or currentDistance < shortestDistance:
+				shortestDistance = currentDistance
+				shortestPath = path
+
+	coords = []
+	for node in shortestPath:
+		for item in roadNodes:
+			if item.attrib['id'] == node:
+				coords.append(float((item.attrib['lat']), float(item.attrib['lon'])))
+	coords.pop(0)
+	coords.pop(len(coords) - 1)
+	return coords
+
+
+
+def getNodeId(node):
+	global roadsNodes
+	for item in roadsNodes:
+		if item.attrib['lat'] == str(node[0]) and item.attrib['lon'] == str(node[1]):
+			return item.attrib['id']
+
+def getRegion(start, end, distInc):
+	#with open(filename, encoding='utf8') as infile:
+	#	html = BeautifulSoup(infile, "html.parser")
+	#osm = open("massachusetts.osm", "r")
+	tree = ET.parse('Amherst1.osm')
 	root = tree.getroot()
 	children = root.getchildren()
 
-	distance = vincenty(start, end).miles
+	#for child in children:
+	#	childrenInRegion.append(child)
+
+	#return children
+
+	distance = vincenty(start, end).meters
+	distIncrease = distInc
+
+	global midpoint
 	midpoint = ((start[0] + end[0]) / 2, (start[1] + end[1]) / 2)
-	distIncrease = 1.1
-
-	degreesLon = (distIncrease * distance / 2) / ((69.172) * math.cos(midpoint[0] * math.pi / 180)) 
-	maxLon = midpoint[1] + degreesLon
-	minLon = midpoint[1] - degreesLon
-	maxLat = midpoint[0] + ((distIncrease * distance / 2) / 69.172)
-	minLat = midpoint[0] - ((distIncrease * distance / 2) / 69.172)
-
-	#print(str(maxLat) + ', ' + str(maxLon) + ', ' + str(minLat) + ', ' + str(minLon))
 
 	#childrenInRegion = []
 	nodesInRegion = []
+	waysInRegion = []
 
 	for child in children:
 		if child.tag == 'node':
 			lat = float(child.attrib['lat'])
 			lon = float(child.attrib['lon'])
-			if lat < maxLat and lat > minLat and lon < maxLon and lon > minLon:
+			distanceToMid = vincenty((lat,lon),midpoint).meters
+			maxDist = distIncrease*distance
+			if distanceToMid < maxDist:
 				childrenInRegion.append(child)
 				nodesInRegion.append(child.attrib['id'])
-	for child in children:
 		if child.tag == 'way':
-			roadInRegion = False
-			for item in child:
-				if item.tag == 'nd' and item.attrib['ref'] in nodesInRegion:
-					roadInRegion = True
-					break
-			if roadInRegion:
-				childrenInRegion.append(child)
+			waysInRegion.append(child)
+
+	for child in waysInRegion:
+		roadInRegion = False
+		for item in child:
+			if item.tag == 'nd' and item.attrib['ref'] in nodesInRegion:
+				roadInRegion = True
+				break
+		if roadInRegion:
+			childrenInRegion.append(child)
 
 	return childrenInRegion
 
@@ -69,11 +166,10 @@ def getNodesOfRoads(region = childrenInRegion):
 		if child.tag == 'node' and child.attrib['id'] in nodeIDs and child not in allRoadNodes:
 			allRoadNodes.append(child)
 
-	for item in allRoadNodes:
-		print(str(item.attrib['lat']) + "," + str(item.attrib['lon']))
+	#for item in allRoadNodes:
+	#	print(str(item.attrib['lat']) + "," + str(item.attrib['lon']))
 
 	return allRoadNodes
-
 
 def getIntersections(region):
 	counter = {}
@@ -159,9 +255,12 @@ def getNeighbors(interList):
 	return intersWithNeighbors
 
 def getNeighborsWithDist(interList):
-	roadsWithNodes = getRoadsWithNodes()
 	neighbors = getNeighbors(interList)
+
+	global roadsNodes
 	roadsNodes = getNodesOfRoads()
+
+	global roadsAndNodes
 	roadsAndNodes = getRoadsWithNodes()
 
 	neighborsWithDist = []
@@ -174,7 +273,9 @@ def getNeighborsWithDist(interList):
 			distances.append(distBetweenNeighbors(item[0][0], item[0][x], roadsNodes, roadsAndNodes))
 		neighborsWithDist.append(distances)
 
-	return (neighborsWithDist, justCoordsList)
+	global neighborsDist
+	neighborsDist = (neighborsWithDist, justCoordsList)
+	return neighborsDist
 
 def distBetweenNeighbors(id1, id2, nodesOfRoads, roadsAndNodes):
 	roadsWithNodes = roadsAndNodes
@@ -195,7 +296,7 @@ def distBetweenNeighbors(id1, id2, nodesOfRoads, roadsAndNodes):
 					path.append(item)
 					if (item == id1) or (item == id2):
 						break
-
+			#print(path)
 			for x in range(0, len(path) - 1):
 
 				currentNode = (0, 0)
@@ -209,7 +310,6 @@ def distBetweenNeighbors(id1, id2, nodesOfRoads, roadsAndNodes):
 
 			if shortestDistance == 0 or currentDistance < shortestDistance:
 				shortestDistance = currentDistance
-
 	return shortestDistance
 
 
@@ -236,4 +336,5 @@ def findAdjacentInters(interList, current, roadsWithNodes):
 						adjacentNodeIDs.append(inter[0][0])
 
 	return (adjacentInters, adjacentNodeIDs)
+
 				
